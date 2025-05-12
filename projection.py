@@ -25,22 +25,44 @@ def tensorlist_to_tensor(weights):
 
 
 def nplist_to_tensor(nplist):
-    """ Concatenate a list of numpy vectors into one tensor.
+    """ Concatenate a list of numpy vectors into one tensor, ensuring float32 dtype.
 
         Args:
             nplist: a list of numpy vectors, e.g., direction loaded from h5 file.
 
         Returns:
-            concatnated 1D tensor
+            concatnated 1D tensor of dtype float32
     """
     v = []
-    for d in nplist:
-        w = torch.tensor(d*np.float64(1.0))
+    if not nplist: # 处理 nplist 为空的情况
+        return torch.empty(0, dtype=torch.float32)
+
+    for d_np in nplist: # d_np 是一个 numpy 数组
+        if not isinstance(d_np, np.ndarray): # 确保元素是numpy数组
+            # 可以选择跳过、报错或尝试转换，这里简单打印并跳过
+            print(f"Warning: Element in nplist is not a numpy array: {type(d_np)}. Skipping.")
+            continue
+        
+        # 将 numpy 数组转换为 float32 类型的 PyTorch 张量
+        # 如果 d_np 本身已经是 float64，直接用 dtype=torch.float32 会进行转换
+        # 如果 d_np 是其他类型，astype(np.float32) 可以先确保 numpy 侧是 float32
+        try:
+            w = torch.tensor(d_np.astype(np.float32), dtype=torch.float32)
+        except Exception as e:
+            print(f"Error converting numpy array to tensor: {e}. Array info: {d_np.shape}, {d_np.dtype}")
+            continue
+
         # Ignoreing the scalar values (w.dim() = 0).
         if w.dim() > 1:
             v.append(w.view(w.numel()))
         elif w.dim() == 1:
             v.append(w)
+        # else: # 如果是0维张量（标量），可以选择忽略或如何处理
+            # print(f"Warning: Encountered a scalar tensor: {w}. Ignoring.")
+            
+    if not v: # 如果循环后 v 仍然为空 (例如所有元素都是标量或转换失败)
+        return torch.empty(0, dtype=torch.float32)
+        
     return torch.cat(v)
 
 

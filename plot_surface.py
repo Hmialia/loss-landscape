@@ -24,6 +24,8 @@ import model_loader
 import scheduler
 import mpi4pytorch as mpi
 
+os.environ["HDF5_USE_FILE_LOCKING"] = "FALSE"
+
 def name_surface_file(args, dir_file):
     # skip if surf_file is specified in args
     if args.surf_file:
@@ -46,26 +48,60 @@ def name_surface_file(args, dir_file):
     return surf_file + ".h5"
 
 
-def setup_surface_file(args, surf_file, dir_file):
-    # skip if the direction file already exists
+def setup_surface_file(args, surf_file, dir_file_arg): # Renamed dir_file to dir_file_arg to avoid confusion
+    f = None # Initialize f to None
+    file_fully_setup = False
+
     if os.path.exists(surf_file):
-        f = h5py.File(surf_file, 'r')
-        if (args.y and 'ycoordinates' in f.keys()) or 'xcoordinates' in f.keys():
+        try:
+            f = h5py.File(surf_file, 'r') # Open in read-only mode first
+            keys_ok = 'xcoordinates' in f.keys()
+            if args.y:
+                keys_ok = keys_ok and 'ycoordinates' in f.keys()
+            
+            if keys_ok and 'dir_file' in f.keys(): # Also check if dir_file metadata is present
+                file_fully_setup = True
+                print ("%s is already set up with coordinates and metadata." % surf_file)
+        except Exception as e:
+            print(f"Warning: Could not properly read existing surf_file {surf_file}. Error: {e}")
+            # It's possible the file exists but is corrupted or incomplete
+        finally:
+            if f:
+                f.close()
+                f = None # Ensure f is reset
+        
+        if file_fully_setup:
+            return surf_file
+
+    # If file doesn't exist, or exists but is not fully set up, open in 'a' mode.
+    # The 'a' mode will create the file if it doesn't exist, or open for R/W if it does.
+    try:
+        # It's crucial that any previous handles are closed before this.
+        f = h5py.File(surf_file, 'a') 
+        
+        if 'dir_file' not in f.keys():
+            f['dir_file'] = dir_file_arg # Use the argument passed to this function
+
+        if 'xcoordinates' not in f.keys():
+            xcoordinates = np.linspace(args.xmin, args.xmax, num=args.xnum)
+            f['xcoordinates'] = xcoordinates
+            print(f"Initialized xcoordinates in {surf_file}")
+
+
+        if args.y:
+            if 'ycoordinates' not in f.keys():
+                ycoordinates = np.linspace(args.ymin, args.ymax, num=args.ynum)
+                f['ycoordinates'] = ycoordinates
+                print(f"Initialized ycoordinates in {surf_file}")
+        
+        print(f"Successfully set up/updated {surf_file}")
+
+    except Exception as e:
+        print(f"Error: Failed to set up or write to surf_file {surf_file} in 'a' mode. Error: {e}")
+        raise # Re-raise the exception to halt execution if setup fails
+    finally:
+        if f:
             f.close()
-            print ("%s is already set up" % surf_file)
-            return
-
-    f = h5py.File(surf_file, 'a')
-    f['dir_file'] = dir_file
-
-    # Create the coordinates(resolutions) at which the function is evaluated
-    xcoordinates = np.linspace(args.xmin, args.xmax, num=args.xnum)
-    f['xcoordinates'] = xcoordinates
-
-    if args.y:
-        ycoordinates = np.linspace(args.ymin, args.ymax, num=args.ynum)
-        f['ycoordinates'] = ycoordinates
-    f.close()
 
     return surf_file
 
@@ -229,13 +265,26 @@ if __name__ == '__main__':
     # Check plotting resolution
     #--------------------------------------------------------------------------
     try:
-        args.xmin, args.xmax, args.xnum = [float(a) for a in args.x.split(':')]
+        x_params = args.x.split(':')
+        if len(x_params) != 3:
+            raise ValueError("X-coordinates format error")
+        args.xmin, args.xmax = float(x_params[0]), float(x_params[1])
+        args.xnum = int(x_params[2]) # 将第三部分转换为整数
+
         args.ymin, args.ymax, args.ynum = (None, None, None)
         if args.y:
-            args.ymin, args.ymax, args.ynum = [float(a) for a in args.y.split(':')]
-            assert args.ymin and args.ymax and args.ynum, \
-            'You specified some arguments for the y axis, but not all'
-    except:
+            y_params = args.y.split(':')
+            if len(y_params) != 3:
+                raise ValueError("Y-coordinates format error")
+            args.ymin, args.ymax = float(y_params[0]), float(y_params[1])
+            args.ynum = int(y_params[2]) # 将第三部分转换为整数
+            assert args.ymin is not None and args.ymax is not None and args.ynum is not None, \
+                   'You specified some arguments for the y axis, but not all'
+    except ValueError as e:
+        print(f"Error parsing coordinates: {e}")
+        raise Exception('Improper format for x- or y-coordinates. Try something like -1:1:51 or ensure 3 parts are given.')
+    except Exception as e:
+        print(f"An unexpected error occurred during coordinate parsing: {e}")
         raise Exception('Improper format for x- or y-coordinates. Try something like -1:1:51')
 
     #--------------------------------------------------------------------------

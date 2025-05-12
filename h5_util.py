@@ -3,6 +3,7 @@
 """
 
 import torch
+import numpy as np # 确保导入
 
 def write_list(f, name, direction):
     """ Save the direction to the hdf5 file with name as the key
@@ -21,6 +22,7 @@ def write_list(f, name, direction):
 
 
 def read_list(f, name):
-    """ Read group with name as the key from the hdf5 file and return a list numpy vectors. """
+    """ Read group with name as the key from the hdf5 file and return a list of numpy vectors. """
     grp = f[name]
-    return [grp[str(i)] for i in range(len(grp))]
+    # 从 h5py.Dataset 对象中获取 NumPy 数组
+    return [np.array(grp[str(i)]) for i in range(len(grp))]
